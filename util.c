@@ -296,7 +296,8 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 		      const char *userpass, const char *rpc_req,
 		      int *curl_err, int flags)
 {
-	json_t *val, *err_val, *res_val;
+//	json_t *val, *err_val, *res_val;
+	json_t *val, *err_val;
 	int rc;
 	long http_rc;
 	struct data_buffer all_data = {0};
@@ -410,7 +411,7 @@ json_t *json_rpc_call(CURL *curl, const char *url,
 
 	/* JSON-RPC valid response returns a non-null 'result',
 	 * and a null 'error'. */
-	res_val = json_object_get(val, "result");
+//	res_val = json_object_get(val, "result");
 	err_val = json_object_get(val, "error");
 
 	if ((err_val && !json_is_null(err_val) && !(flags & JSON_RPC_IGNOREERR))) {
@@ -1347,7 +1348,7 @@ out:
 
 void xmr_hash_test(void)
 {
-	char hash[32];
+	unsigned char hash[32];
 	uint32_t data[32];
 	int fail = 0;
 	char src[10][125] = {
@@ -1380,7 +1381,7 @@ void xmr_hash_test(void)
 
 	for (int i = 0; i < 10; i++) {
 		size_t len = strlen(src[i]);
-		char *blob = malloc(len / 2);
+		unsigned char *blob = malloc(len / 2);
 		if (!blob) {
 			fail = 1;
 			applog(LOG_ERR, "malloc failure");

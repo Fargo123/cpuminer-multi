@@ -27,10 +27,11 @@
  * POSSIBILITY OF SUCH DAMAGE.
  * ---------------------------------------------------------------------------
  */
+/*
 static const char _NR[] = {
 	0x4e,0x61,0x62,0x69,0x6c,0x20,0x53,0x2e,0x20,
 	0x41,0x6c,0x20,0x52,0x61,0x6d,0x6c,0x69,0x00 };
-
+*/
 #include "miner.h"
 
 #include <stddef.h>
@@ -792,7 +793,7 @@ OAES_RET oaes_key_import_data( OAES_CTX * ctx,
 		const uint8_t * data, size_t data_len )
 {
 	oaes_ctx * _ctx = (oaes_ctx *) ctx;
-	OAES_RET _rc = OAES_RET_SUCCESS;
+//	OAES_RET _rc = OAES_RET_SUCCESS;
 	
 	_ctx->key = (oaes_key *) calloc( sizeof( oaes_key ), 1 );
 	

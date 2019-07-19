@@ -154,7 +154,7 @@ bool jsonrpc_2 = false;
 int opt_timeout = 0;
 static int opt_scantime = 5;
 static json_t *opt_config;
-static const bool opt_time = true;
+//static const bool opt_time = true;
 static enum mining_algo opt_algo = ALGO_CRYPTONIGHT;
 static int opt_n_threads;
 static int num_processors;
@@ -172,7 +172,7 @@ int daemon_thr_id = -1;
 struct work_restart *work_restart = NULL;
 static struct stratum_ctx stratum;
 static char rpc2_id[64] = "";
-static char *rpc2_blob = NULL;
+static unsigned char *rpc2_blob = NULL;
 static int rpc2_bloblen = 0;
 static uint32_t rpc2_target = 0;
 static char *rpc2_job_id = NULL;
@@ -407,7 +407,7 @@ bool rpc2_job_decode(const json_t *job, struct work *work) {
     }
     if (blobLen != 0) {
         pthread_mutex_lock(&rpc2_job_lock);
-        char *blob = malloc(blobLen / 2);
+        unsigned char *blob = malloc(blobLen / 2);
         if (!hex2bin(blob, hexblob, blobLen / 2)) {
             applog(LOG_ERR, "JSON inval blob");
             pthread_mutex_unlock(&rpc2_job_lock);
@@ -611,7 +611,7 @@ static bool submit_upstream_work(CURL *curl, struct work *work) {
 
         if (jsonrpc_2) {
             noncestr = bin2hex(((const unsigned char*)work->data) + 39, 4);
-            char hash[32];
+            unsigned char hash[32];
             switch(opt_algo) {
             case ALGO_CRYPTONIGHT:
             default:
@@ -681,7 +681,7 @@ static bool submit_upstream_work(CURL *curl, struct work *work) {
         /* build JSON-RPC request */
         if(jsonrpc_2) {
             char *noncestr = bin2hex(((const unsigned char*)work->data) + 39, 4);
-            char hash[32];
+            unsigned char hash[32];
             switch(opt_algo) {
             case ALGO_CRYPTONIGHT:
             default:
@@ -796,7 +796,7 @@ static bool rpc2_login(CURL *curl) {
     gettimeofday(&tv_end, NULL );
 
     if (!val)
-        goto end;
+        goto fail;
 
 //    applog(LOG_DEBUG, "JSON value: %s", json_dumps(val, 0));
 
@@ -804,12 +804,12 @@ static bool rpc2_login(CURL *curl) {
 
     json_t *result = json_object_get(val, "result");
 
-    if(!result) goto end;
+    if(!result) goto fail;
 
     json_t *job = json_object_get(result, "job");
 
     if(!rpc2_job_decode(job, &g_work)) {
-        goto end;
+        goto fail;
     }
 
     if (opt_debug && rc) {
@@ -820,8 +820,10 @@ static bool rpc2_login(CURL *curl) {
 
     json_decref(val);
 
-    end:
     return rc;
+
+    fail:
+    return rc = false;
 }
 
 static void workio_cmd_free(struct workio_cmd *wc) {
@@ -1026,8 +1028,8 @@ static bool submit_work(struct thr_info *thr, const struct work *work_in) {
 }
 
 static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work) {
-    unsigned char merkle_root[64];
-    int i;
+//    unsigned char merkle_root[64];
+//    int i;
 
     pthread_mutex_lock(&sctx->work_lock);
 
@@ -1090,9 +1092,9 @@ static void *miner_thread(void *userdata) {
     struct work work = { { 0 } };
     uint32_t max_nonce;
     uint32_t end_nonce = 0xffffffffU / opt_n_threads * (thr_id + 1) - 0x20;
-    unsigned char *scratchbuf = NULL;
-    char s[16];
-    int i;
+//    unsigned char *scratchbuf = NULL;
+//    char s[16];
+//    int i;
 	struct cryptonight_ctx *persistentctx;
 	
     /* Set worker threads to nice 19 and then preferentially to SCHED_IDLE
@@ -1438,7 +1440,7 @@ static void *daemon_thread(void *userdata) {
                     g_work.target[6] = diff & 0xffffffff;
                     g_work.target[7] = diff >> 32;
                     free(g_work.xnonce2);
-                    g_work.xnonce2 = strdup(tmpl);
+                    g_work.xnonce2 = (unsigned char *)strdup(tmpl);
                     g_work.xnonce2_len = strlen(tmpl)+1;
                     prevheight = height;
                     time(&g_work_time);
@@ -1941,11 +1943,11 @@ static void signal_handler(int sig) {
 
 int main(int argc, char *argv[]) {
     struct thr_info *thr;
-    unsigned int tmp1, tmp2, tmp3, tmp4;
     long flags;
     int i;
 	
 	#ifndef USE_LOBOTOMIZED_AES
+	unsigned int tmp1, tmp2, tmp3, tmp4;
 	// If the CPU doesn't support CPUID feature
 	// flags, it's WAY too old to have AES-NI
 	if(__get_cpuid_max(0, &tmp1) < 1)
@@ -2061,9 +2063,9 @@ int main(int argc, char *argv[]) {
     thr_hashrates = (double *) calloc(opt_n_threads, sizeof(double));
     if (!thr_hashrates)
         return 1;
-	
-	thr_times = (double *)calloc(opt_n_threads, sizeof(double));
-	
+
+    thr_times = (double *)calloc(opt_n_threads, sizeof(double));
+
     /* init workio thread info */
     work_thr_id = opt_n_threads;
     thr = &thr_info[work_thr_id];

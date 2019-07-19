@@ -15,7 +15,7 @@ THREADV v4_random_math_JIT_func hp_jitfunc = NULL;
 THREADV uint8_t *hp_jitfunc_memory = NULL;
 THREADV int hp_jitfunc_allocated = 0;
 
-void alloc_jit_mem(void)
+static inline void alloc_jit_mem(void)
 {
 #if defined(_MSC_VER) || defined(__MINGW32__)
 	hp_jitfunc_memory = (uint8_t *) VirtualAlloc(hp_jitfunc_memory, 4096 + 4095,
@@ -46,7 +46,7 @@ void alloc_jit_mem(void)
 #endif
 }
 
-void free_jit_mem(void)
+static inline void free_jit_mem(void)
 {
 	if(!hp_jitfunc_allocated)
 		free(hp_jitfunc_memory);
@@ -405,7 +405,7 @@ void cryptonight_hash_ctx(void *restrict output, const void *restrict input, int
 
 	/* Variant 4 */
 	__m128i a_tmp = *av;
-	VARIANT4_RANDOM_MATH(a, b, r, &b_tmp, &dv);
+	VARIANT4_RANDOM_MATH(a, b, r, b_tmp, dv);
 	/* End of Variant 4 */
 
 	/* 64bit multiply of c[0] and b[0] */
@@ -472,7 +472,7 @@ void cryptonight_hash_ctx(void *restrict output, const void *restrict input, int
 
 	/* Variant 4 */
 	a_tmp = *av;
-	VARIANT4_RANDOM_MATH(a, b, r, &b_tmp, &dv);
+	VARIANT4_RANDOM_MATH(a, b, r, b_tmp, dv);
 	/* End of Variant 4 */
 
 	/* 64bit multiply of c[0] and b[0] */
@@ -539,7 +539,7 @@ void cryptonight_hash_ctx(void *restrict output, const void *restrict input, int
 
 	/* Variant 4 */
 	a_tmp = *av;
-	VARIANT4_RANDOM_MATH(a, b, r, &b_tmp, &dv);
+	VARIANT4_RANDOM_MATH(a, b, r, b_tmp, dv);
 	/* End of Variant 4 */
 
 	/* 64bit multiply of c[0] and b[0] */

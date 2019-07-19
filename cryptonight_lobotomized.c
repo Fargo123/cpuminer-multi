@@ -15,7 +15,7 @@ THREADV v4_random_math_JIT_func hp_jitfunc = NULL;
 THREADV uint8_t *hp_jitfunc_memory = NULL;
 THREADV int hp_jitfunc_allocated = 0;
 
-void alloc_jit_mem(void)
+static inline void alloc_jit_mem(void)
 {
 #if defined(_MSC_VER) || defined(__MINGW32__)
 	hp_jitfunc_memory = (uint8_t *) VirtualAlloc(hp_jitfunc_memory, 4096 + 4095,
@@ -46,7 +46,7 @@ void alloc_jit_mem(void)
 #endif
 }
 
-void free_jit_mem(void)
+static inline void free_jit_mem(void)
 {
 	if(!hp_jitfunc_allocated)
 		free(hp_jitfunc_memory);
@@ -348,7 +348,7 @@ static inline void mul_sum_xor_dst(uint64_t *cb, uint64_t *a, uint8_t *ptr, cons
 	b[0] = ((uint64_t *)((ptr) + (offset)))[0];
 	b[1] = ((uint64_t *)((ptr) + (offset)))[1];
 
-	VARIANT4_RANDOM_MATH(a, b, r, &_b, b1);
+	VARIANT4_RANDOM_MATH(a, b, r, _b, *b1);
 
 	lo = mul128(cb[0], b[0], &hi);
 

@@ -33,9 +33,6 @@
 
 #include "cryptonight.h"
 
-#define SWAP32LE(x) ((uint32_t) (x))
-#define SWAP64LE(x) ((uint64_t) (x))
-
 // Register size can be configured to either 32 bit (uint32_t) or 64 bit (uint64_t)
 typedef uint32_t v4_reg;
 
@@ -43,7 +40,7 @@ enum V4_Settings
 {
 	// Generate code with minimal theoretical latency = 45 cycles, which is equivalent to 15 multiplications
 	TOTAL_LATENCY = 15 * 3,
-	
+
 	// Always generate at least 60 instructions
 	NUM_INSTRUCTIONS_MIN = 60,
 
@@ -231,10 +228,8 @@ static inline int v4_random_math_init(struct V4_Instruction* code, const uint64_
 	// Available ALUs for each instruction
 	const int op_ALUs[V4_INSTRUCTION_COUNT] = { ALU_COUNT_MUL, ALU_COUNT, ALU_COUNT, ALU_COUNT, ALU_COUNT, ALU_COUNT };
 
-	int8_t data[32];
-	memset(data, 0, sizeof(data));
-	uint64_t tmp = SWAP64LE(height);
-	memcpy(data, &tmp, sizeof(uint64_t));
+	int8_t data[32] = {0};
+	memcpy(data, &height, sizeof(uint64_t));
 	data[20] = -38; // change seed
 
 	// Set data_index past the last byte in data
@@ -248,8 +243,8 @@ static inline int v4_random_math_init(struct V4_Instruction* code, const uint64_
 	// So we keep track of it and try again if it's not used
 	bool r8_used;
 	do {
-		int latency[9];
-		int asic_latency[9];
+		int latency[9] = {0};
+		int asic_latency[9] = {0};
 
 		// Tracks previous instruction and value of the source operand for registers R0-R3 throughout code execution
 		// byte 0: current value of the destination register
@@ -260,16 +255,11 @@ static inline int v4_random_math_init(struct V4_Instruction* code, const uint64_
 		// the same operation twice with two constant source registers, it can be optimized into a single operation
 		uint32_t inst_data[9] = { 0, 1, 2, 3, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF, 0xFFFFFF };
 
-		bool alu_busy[TOTAL_LATENCY + 1][ALU_COUNT];
-		bool is_rotation[V4_INSTRUCTION_COUNT];
-		bool rotated[4];
+		bool alu_busy[TOTAL_LATENCY + 1][ALU_COUNT] = {0};
+		bool is_rotation[V4_INSTRUCTION_COUNT] = {0};
+		bool rotated[4] = {0};
 		int rotate_count = 0;
 
-		memset(latency, 0, sizeof(latency));
-		memset(asic_latency, 0, sizeof(asic_latency));
-		memset(alu_busy, 0, sizeof(alu_busy));
-		memset(is_rotation, 0, sizeof(is_rotation));
-		memset(rotated, 0, sizeof(rotated));
 		is_rotation[ROR] = true;
 		is_rotation[ROL] = true;
 
@@ -415,9 +405,7 @@ static inline int v4_random_math_init(struct V4_Instruction* code, const uint64_
 
 					// ADD instruction requires 4 more random bytes for 32-bit constant "C" in "a = a + b + C"
 					check_data(&data_index, sizeof(uint32_t), data, sizeof(data));
-					uint32_t t;
-					memcpy(&t, data + data_index, sizeof(uint32_t));
-					code[code_size].C = SWAP32LE(t);
+					memcpy(&code[code_size].C, data + data_index, sizeof(uint32_t));
 					data_index += sizeof(uint32_t);
 				}
 
@@ -473,22 +461,14 @@ static inline int v4_random_math_init(struct V4_Instruction* code, const uint64_
 	return code_size;
 }
 
-#define V4_REG_LOAD(dst, src) \
-  do { \
-    memcpy((dst), (src), sizeof(v4_reg)); \
-    if (sizeof(v4_reg) == sizeof(uint32_t)) \
-      *(dst) = SWAP32LE(*(dst)); \
-    else \
-      *(dst) = SWAP64LE(*(dst)); \
-  } while (0)
-
 #define VARIANT4_RANDOM_MATH_INIT() \
   v4_reg r[9]; \
   struct V4_Instruction code[NUM_INSTRUCTIONS_MAX + 1]; \
-  do \
-  { \
-    for (int i = 0; i < 4; ++i) \
-      V4_REG_LOAD(r + i, (uint8_t*)(ctx->state.hs.w + 12) + sizeof(v4_reg) * i); \
+  do { \
+    r[0] = ctx->state.hs.w[12]; \
+    r[1] = ctx->state.hs.w[12] >> 32; \
+    r[2] = ctx->state.hs.w[13]; \
+    r[3] = ctx->state.hs.w[13] >> 32; \
     v4_random_math_init(code, height); \
     if (JIT) { \
       int ret = v4_generate_JIT_code(code, hp_jitfunc, 4096); \
@@ -500,39 +480,22 @@ static inline int v4_random_math_init(struct V4_Instruction* code, const uint64_
   } while (0)
 
 #define VARIANT4_RANDOM_MATH(a, b, r, _b, _b1) \
-  do \
-  { \
-    uint64_t t[2]; \
-    memcpy(t, b, sizeof(uint64_t)); \
+  do { \
+    b[0] ^= (uint64_t)((r[0] + r[1]) | ((uint64_t)(r[2] + r[3]) << 32)); \
     \
-    if (sizeof(v4_reg) == sizeof(uint32_t)) \
-      t[0] ^= SWAP64LE((r[0] + r[1]) | ((uint64_t)(r[2] + r[3]) << 32)); \
-    else \
-      t[0] ^= SWAP64LE((r[0] + r[1]) ^ (r[2] + r[3])); \
-    \
-    memcpy(b, t, sizeof(uint64_t)); \
-    \
-    V4_REG_LOAD(r + 4, a); \
-    V4_REG_LOAD(r + 5, (uint64_t*)(a) + 1); \
-    V4_REG_LOAD(r + 6, _b); \
-    V4_REG_LOAD(r + 7, _b1); \
-    V4_REG_LOAD(r + 8, (uint64_t*)(_b1) + 1); \
+    r[4] = a[0]; \
+    r[5] = a[1]; \
+    r[6] = _mm_cvtsi128_si32(_b); \
+    r[7] = _mm_cvtsi128_si32(_b1); \
+    r[8] = _mm_cvtsi128_si32(_mm_shuffle_epi32(_b1, 0xAA)); \
     \
     if (JIT) \
       (*hp_jitfunc)(r); \
     else \
       v4_random_math(code, r); \
     \
-    memcpy(t, a, sizeof(uint64_t) * 2); \
-    \
-    if (sizeof(v4_reg) == sizeof(uint32_t)) { \
-      t[0] ^= SWAP64LE(r[2] | ((uint64_t)(r[3]) << 32)); \
-      t[1] ^= SWAP64LE(r[0] | ((uint64_t)(r[1]) << 32)); \
-    } else { \
-      t[0] ^= SWAP64LE(r[2] ^ r[3]); \
-      t[1] ^= SWAP64LE(r[0] ^ r[1]); \
-    } \
-    memcpy(a, t, sizeof(uint64_t) * 2); \
+    a[0] ^= (uint64_t)(r[2] | ((uint64_t)(r[3]) << 32)); \
+    a[1] ^= (uint64_t)(r[0] | ((uint64_t)(r[1]) << 32)); \
 } while (0)
 
 #endif
