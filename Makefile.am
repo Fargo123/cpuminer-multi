@@ -27,7 +27,7 @@ minerd_SOURCES	= elist.h \
 		  cryptonight_common.c \
 		  crypto/c_keccak.c \
 		  crypto/c_groestl.c \
-		  crypto/c_blake256.c \
+		  crypto/blake256_sse2.c \
 		  crypto/c_jh.c \
 		  crypto/c_skein.c
 
