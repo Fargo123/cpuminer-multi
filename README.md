@@ -17,7 +17,7 @@ This is a multi-threaded CPU miner, fork of [LucasJones](//github.com/lucasjones
 Algorithms
 ==========
 #### Currently supported
- * ✓ __cryptonight__ (Bytecoin [BCN], Monero)
+ * ✓ __cryptonightR__ (Monero)
 
 Dependencies
 ============
@@ -47,6 +47,8 @@ Build
 Usage instructions
 ==================
 Run "minerd --help" to see options.
+
+For better performance, allocate 2 hugepages per thread.
 
 ### Connecting through a proxy
 
