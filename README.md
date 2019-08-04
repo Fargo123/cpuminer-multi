@@ -38,6 +38,8 @@ Build
  * Optimal GCC flags are built in - you only need to use -march=native if you want it
  * CFLAGS="*-march=native*" ./configure
    * # Use -march=native if building for a single machine
+ * If you don't have AES-NI or if you are compiling for 32bit, add --disable-aes-ni to ./configure
+   * ./configure --disable-aes-ni
  * make
 
 #### Architecture-specific notes:
