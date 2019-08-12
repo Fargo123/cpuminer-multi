@@ -1,5 +1,68 @@
-#include "cryptonight.h"
 #include <x86intrin.h>
+#include <string.h>
+#include "cryptonight.h"
+#include "mul128.h"
+#include "variant4_random_math.h"
+#include "CryptonightR_JIT.h"
+
+#if defined __unix__
+#include <sys/mman.h>
+#elif defined _WIN32
+#include <windows.h>
+#endif
+
+THREADV v4_random_math_JIT_func hp_jitfunc = NULL;
+THREADV uint8_t *hp_jitfunc_memory = NULL;
+THREADV int hp_jitfunc_allocated = 0;
+
+static inline void alloc_jit_mem(void)
+{
+#if defined(_MSC_VER) || defined(__MINGW32__)
+	hp_jitfunc_memory = (uint8_t *) VirtualAlloc(hp_jitfunc_memory, 4096 + 4095,
+						     MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+#else
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
+	defined(__DragonFly__) || defined(__NetBSD__)
+	hp_jitfunc_memory = mmap(0, 4096 + 4095, PROT_READ | PROT_WRITE | PROT_EXEC,
+				 MAP_PRIVATE | MAP_ANON, 0, 0);
+#else
+	hp_jitfunc_memory = mmap(0, 4096 + 4095, PROT_READ | PROT_WRITE | PROT_EXEC,
+				 MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+#endif
+	if(hp_jitfunc_memory == MAP_FAILED)
+		hp_jitfunc_memory = NULL;
+#endif
+
+	hp_jitfunc_allocated = 1;
+	if (hp_jitfunc_memory == NULL)
+	{
+		hp_jitfunc_allocated = 0;
+		hp_jitfunc_memory = malloc(4096 + 4095);
+	}
+	hp_jitfunc = (v4_random_math_JIT_func)((size_t)(hp_jitfunc_memory + 4095) & ~4095);
+
+#if !(defined(_MSC_VER) || defined(__MINGW32__))
+	mprotect(hp_jitfunc, 4096, PROT_READ | PROT_WRITE | PROT_EXEC);
+#endif
+}
+
+static inline void free_jit_mem(void)
+{
+	if(!hp_jitfunc_allocated)
+		free(hp_jitfunc_memory);
+	else
+	{
+#if defined(_MSC_VER) || defined(__MINGW32__)
+		VirtualFree(hp_jitfunc_memory, 0, MEM_RELEASE);
+#else
+		munmap(hp_jitfunc_memory, 4096 + 4095);
+#endif
+	}
+
+	hp_jitfunc = NULL;
+	hp_jitfunc_memory = NULL;
+	hp_jitfunc_allocated = 0;
+}
 
 const uint32_t TestTable1[256]  __attribute((aligned(16))) ={
     0xA56363C6,0x847C7CF8,0x997777EE,0x8D7B7BF6,0x0DF2F2FF,0xBD6B6BD6,0xB16F6FDE,0x54C5C591,
@@ -141,137 +204,340 @@ const uint32_t TestTable4[256]  __attribute((aligned(16))) ={
     0x82C34141,0x29B09999,0x5A772D2D,0x1E110F0F,0x7BCBB0B0,0xA8FC5454,0x6DD6BBBB,0x2C3A1616
 };
 
-static inline void SubAndShiftAndMixAddRound(uint32_t *restrict out, uint32_t *temp, uint32_t *restrict AesEncKey)
+// #define USE_AES_NI_KEY_EXPAND
+#ifdef USE_AES_NI_KEY_EXPAND
+static inline void ExpandAESKey256_sub1(__m128i *tmp1, __m128i *tmp2)
 {
-	uint8_t *state = &temp[0];
+	__m128i tmp4;
+	*tmp2 = _mm_shuffle_epi32(*tmp2, 0xFF);
+	tmp4 = _mm_slli_si128(*tmp1, 0x04);
+	*tmp1 = _mm_xor_si128(*tmp1, tmp4);
+	tmp4 = _mm_slli_si128(tmp4, 0x04);
+	*tmp1 = _mm_xor_si128(*tmp1, tmp4);
+	tmp4 = _mm_slli_si128(tmp4, 0x04);
+	*tmp1 = _mm_xor_si128(*tmp1, tmp4);
+	*tmp1 = _mm_xor_si128(*tmp1, *tmp2);
+}
+
+static inline void ExpandAESKey256_sub2(__m128i *tmp1, __m128i *tmp3)
+{
+	__m128i tmp2, tmp4;
 	
-	out[0]= TestTable1[state[0]] ^ TestTable2[state[5]] ^ TestTable3[state[10]] ^ TestTable4[state[15]] ^ AesEncKey[0];
-	out[1]= TestTable4[state[3]] ^ TestTable1[state[4]] ^ TestTable2[state[9]]  ^ TestTable3[state[14]] ^ AesEncKey[1];
-	out[2]= TestTable3[state[2]] ^ TestTable4[state[7]] ^ TestTable1[state[8]]  ^ TestTable2[state[13]] ^ AesEncKey[2];
-	out[3]= TestTable2[state[1]] ^ TestTable3[state[6]] ^ TestTable4[state[11]] ^ TestTable1[state[12]] ^ AesEncKey[3];
+	tmp4 = _mm_aeskeygenassist_si128(*tmp1, 0x00);
+	tmp2 = _mm_shuffle_epi32(tmp4, 0xAA);
+	tmp4 = _mm_slli_si128(*tmp3, 0x04);
+	*tmp3 = _mm_xor_si128(*tmp3, tmp4);
+	tmp4 = _mm_slli_si128(tmp4, 0x04);
+	*tmp3 = _mm_xor_si128(*tmp3, tmp4);
+	tmp4 = _mm_slli_si128(tmp4, 0x04);
+	*tmp3 = _mm_xor_si128(*tmp3, tmp4);
+	*tmp3 = _mm_xor_si128(*tmp3, tmp2);
 }
 
-static inline void SubAndShiftAndMixAddRoundInPlace(uint32_t *restrict temp, uint32_t *restrict AesEncKey)
+static inline void ExpandAESKey256(const __m128i *userkey, __m128i *keys)
 {
-	uint8_t state[16];
-	memcpy(state, temp, 16);
+	__m128i tmp1, tmp2, tmp3;
 
-	temp[0]= TestTable1[state[0]] ^ TestTable2[state[5]] ^ TestTable3[state[10]] ^ TestTable4[state[15]] ^ AesEncKey[0];
-	temp[1]= TestTable4[state[3]] ^ TestTable1[state[4]] ^ TestTable2[state[9]]  ^ TestTable3[state[14]] ^ AesEncKey[1];
-	temp[2]= TestTable3[state[2]] ^ TestTable4[state[7]] ^ TestTable1[state[8]]  ^ TestTable2[state[13]] ^ AesEncKey[2];
-	temp[3]= TestTable2[state[1]] ^ TestTable3[state[6]] ^ TestTable4[state[11]] ^ TestTable1[state[12]] ^ AesEncKey[3];
+	tmp1 = userkey[0];
+	tmp3 = userkey[1];
+
+	keys[0] = tmp1;
+	keys[1] = tmp3;
+
+	tmp2 = _mm_aeskeygenassist_si128(tmp3, 0x01);
+	ExpandAESKey256_sub1(&tmp1, &tmp2);
+	keys[2] = tmp1;
+	ExpandAESKey256_sub2(&tmp1, &tmp3);
+	keys[3] = tmp3;
+
+	tmp2 = _mm_aeskeygenassist_si128(tmp3, 0x02);
+	ExpandAESKey256_sub1(&tmp1, &tmp2);
+	keys[4] = tmp1;
+	ExpandAESKey256_sub2(&tmp1, &tmp3);
+	keys[5] = tmp3;
+
+	tmp2 = _mm_aeskeygenassist_si128(tmp3, 0x04);
+	ExpandAESKey256_sub1(&tmp1, &tmp2);
+	keys[6] = tmp1;
+	ExpandAESKey256_sub2(&tmp1, &tmp3);
+	keys[7] = tmp3;
+
+	tmp2 = _mm_aeskeygenassist_si128(tmp3, 0x08);
+	ExpandAESKey256_sub1(&tmp1, &tmp2);
+	keys[8] = tmp1;
+	ExpandAESKey256_sub2(&tmp1, &tmp3);
+	keys[9] = tmp3;
 }
+#endif
 
-static inline uint64_t mul128(uint64_t multiplier, uint64_t multiplicand, uint64_t *product_hi)
+static inline void SubAndShiftAndMixAddRound(__m128i *restrict out, uint8_t *in, __m128i *restrict AesEncKey)
 {
-  // multiplier   = ab = a * 2^32 + b
-  // multiplicand = cd = c * 2^32 + d
-  // ab * cd = a * c * 2^64 + (a * d + b * c) * 2^32 + b * d
-  uint64_t a = multiplier >> 32;
-  uint64_t b = multiplier & 0xFFFFFFFF;
-  uint64_t c = multiplicand >> 32;
-  uint64_t d = multiplicand & 0xFFFFFFFF;
+	uint8_t state[16] __attribute__ ((aligned(16)));
+	memcpy(state, in, 16);
 
-  //uint64_t ac = a * c;
-  uint64_t ad = a * d;
-  //uint64_t bc = b * c;
-  uint64_t bd = b * d;
+	uint32_t tmp1 = TestTable1[state[0]];
+	uint32_t tmp2 = TestTable4[state[3]];
+	uint32_t tmp3 = TestTable3[state[2]];
+	uint32_t tmp4 = TestTable2[state[1]];
 
-  uint64_t adbc = ad + (b * c);
-  uint64_t adbc_carry = adbc < ad ? 1 : 0;
+	__m128i temp1 = _mm_setr_epi32(tmp1, tmp2, tmp3, tmp4);
 
-  // multiplier * multiplicand = product_hi * 2^64 + product_lo
-  uint64_t product_lo = bd + (adbc << 32);
-  uint64_t product_lo_carry = product_lo < bd ? 1 : 0;
-  *product_hi = (a * c) + (adbc >> 32) + (adbc_carry << 32) + product_lo_carry;
-  //assert(ac <= *product_hi);
+	uint32_t tmp5 = TestTable2[state[5]];
+	uint32_t tmp6 = TestTable1[state[4]];
+	uint32_t tmp7 = TestTable4[state[7]];
+	uint32_t tmp8 = TestTable3[state[6]];
 
-  return product_lo;
+	__m128i temp2 = _mm_setr_epi32(tmp5, tmp6, tmp7, tmp8);
+
+	tmp1 = TestTable3[state[10]];
+	tmp2 = TestTable2[state[9]];
+	tmp3 = TestTable1[state[8]];
+	tmp4 = TestTable4[state[11]];
+
+	__m128i temp3 = _mm_setr_epi32(tmp1, tmp2, tmp3, tmp4);
+
+	tmp5 = TestTable4[state[15]];
+	tmp6 = TestTable3[state[14]];
+	tmp7 = TestTable2[state[13]];
+	tmp8 = TestTable1[state[12]];
+
+	__m128i temp4 = _mm_setr_epi32(tmp5, tmp6, tmp7, tmp8);
+
+	temp2 = _mm_xor_si128(temp2, temp1);
+	temp2 = _mm_xor_si128(temp2, temp3);
+	temp2 = _mm_xor_si128(temp2, temp4);
+#if __x86_64__
+	*out = _mm_xor_si128(temp2, *AesEncKey);
+#else
+	__m128i temp5 = _mm_loadu_si128(AesEncKey);
+	temp2 = _mm_xor_si128(temp2, temp5);
+	_mm_storeu_si128(out, temp2);
+#endif
 }
 
-static inline void xor_blocks(uint8_t *restrict a, const uint8_t *restrict b) {
-    ((uint64_t*) a)[0] ^= ((uint64_t*) b)[0];
-    ((uint64_t*) a)[1] ^= ((uint64_t*) b)[1];
+static inline void SubAndShiftAndMixAddRoundInPlace(uint8_t *restrict in_out, __m128i *restrict AesEncKey)
+{
+	uint8_t state[16] __attribute__ ((aligned(16)));
+
+	memcpy(state, in_out, 16);
+
+	__m128i temp1 = _mm_setr_epi32(TestTable1[state[0]], TestTable4[state[3]], TestTable3[state[2]], TestTable2[state[1]]);
+	__m128i temp2 = _mm_setr_epi32(TestTable2[state[5]], TestTable1[state[4]], TestTable4[state[7]], TestTable3[state[6]]);
+
+	temp2 = _mm_xor_si128(temp2, temp1);
+	temp1 = _mm_setr_epi32(TestTable3[state[10]], TestTable2[state[9]], TestTable1[state[8]], TestTable4[state[11]]);
+	temp2 = _mm_xor_si128(temp2, temp1);
+	temp1 = _mm_setr_epi32(TestTable4[state[15]], TestTable3[state[14]], TestTable2[state[13]], TestTable1[state[12]]);
+	temp2 = _mm_xor_si128(temp2, temp1);
+
+	temp2 = _mm_xor_si128(temp2, *AesEncKey);
+	_mm_storeu_si128((__m128i *)in_out, temp2);
 }
 
-int cryptonight_hash_ctx(void *restrict output, const void *restrict input, int inlen, struct cryptonight_ctx *restrict ctx, int variant) {
-    
-    ctx->aes_ctx = (oaes_ctx*) oaes_alloc();
-    size_t i, j;
-    //hash_process(&ctx->state.hs, (const uint8_t*) input, 76);
-    keccak((const uint8_t *)input, inlen, &ctx->state.hs, 200);
-    memcpy(ctx->text, ctx->state.init, INIT_SIZE_BYTE);
+static inline void mul_sum_xor_dst(uint64_t *cb, uint64_t *a, uint8_t *ptr, const uint64_t offset,
+				   __m128i *b1, uint32_t *r, struct V4_Instruction *code, const uint64_t *bb)
+{
+	uint64_t hi;
+	uint64_t lo;
+	uint64_t b[2];
 
-    VARIANT1_INIT();
-    
-    oaes_key_import_data(ctx->aes_ctx, ctx->state.hs.b, AES_KEY_SIZE);
-    
-    for(i = 0; likely(i < MEMORY); i += INIT_SIZE_BYTE)
-    {
+	const __m128i _b = _mm_loadu_si128((__m128i *)bb);
+	const __m128i _a = _mm_loadu_si128((__m128i *)a);
+	__m128i _c = _mm_loadu_si128((__m128i *)cb);
+
+	b[0] = ((uint64_t *)((ptr) + (offset)))[0];
+	b[1] = ((uint64_t *)((ptr) + (offset)))[1];
+
+	VARIANT4_RANDOM_MATH(a, b, r, _b, *b1);
+
+	lo = mul128(cb[0], b[0], &hi);
+
+	__m128i chunk1 = _mm_loadu_si128((__m128i *)((ptr) + ((offset) ^ 0x10)));
+	const __m128i chunk2 = _mm_loadu_si128((__m128i *)((ptr) + ((offset) ^ 0x20)));
+	const __m128i chunk3 = _mm_loadu_si128((__m128i *)((ptr) + ((offset) ^ 0x30)));
+
+	_mm_storeu_si128((__m128i *)((ptr) + ((offset) ^ 0x10)), _mm_add_epi64(chunk3, *b1));
+	_mm_storeu_si128((__m128i *)((ptr) + ((offset) ^ 0x20)), _mm_add_epi64(chunk1, _b));
+	_mm_storeu_si128((__m128i *)((ptr) + ((offset) ^ 0x30)), _mm_add_epi64(chunk2, _a));
+
+	/* Variant 4 */
+	chunk1 = _mm_xor_si128(chunk1, chunk2);
+	_c = _mm_xor_si128(_c, chunk3);
+	_c = _mm_xor_si128(_c, chunk1);
+	/* End of Variant 4 */
+
+	hi += a[0];
+	lo += a[1];
+
+	a[0] = b[0] ^ hi;
+	a[1] = b[1] ^ lo;
+
+	((uint64_t *)((ptr) + (offset)))[0] = hi;
+	((uint64_t *)((ptr) + (offset)))[1] = lo;
+
+	*b1 = _b;
+	_mm_storeu_si128((__m128i *)cb, _c);
+}
+
+static inline void xor_blocks(uint8_t *restrict a, const uint8_t *restrict b)
+{
+#if __x86_64__
+	__m128i *av = (__m128i *)a;
+	__m128i *bv = (__m128i *)b;
+
+	*av = _mm_xor_si128(*av, *bv);
+#else
+	((uint64_t*) a)[0] ^= ((uint64_t*) b)[0];
+	((uint64_t*) a)[1] ^= ((uint64_t*) b)[1];
+#endif
+}
+
+static inline void shuffle_add(const uint8_t *restrict ptr, const uint64_t offset, const uint64_t *a,
+			       const uint64_t *b, const __m128i *b1, __m128i *restrict cb)
+{
+	const __m128i _b = _mm_loadu_si128((__m128i *)b);
+	const __m128i _a = _mm_loadu_si128((__m128i *)a);
+
+	__m128i chunk1 = _mm_loadu_si128((__m128i *)((ptr) + ((offset) ^ 0x10)));
+	const __m128i chunk2 = _mm_loadu_si128((__m128i *)((ptr) + ((offset) ^ 0x20)));
+	__m128i chunk3 = _mm_loadu_si128((__m128i *)((ptr) + ((offset) ^ 0x30)));
+
+	_mm_storeu_si128((__m128i *)((ptr) + ((offset) ^ 0x10)), _mm_add_epi64(chunk3, *b1));
+	_mm_storeu_si128((__m128i *)((ptr) + ((offset) ^ 0x20)), _mm_add_epi64(chunk1, _b));
+	_mm_storeu_si128((__m128i *)((ptr) + ((offset) ^ 0x30)), _mm_add_epi64(chunk2, _a));
+
+	/* Variant 4 */
+	chunk1 = _mm_xor_si128(chunk1, chunk2);
+#if __x86_64__
+	chunk3 = _mm_xor_si128(*cb, chunk3);
+	*cb = _mm_xor_si128(chunk3, chunk1);
+#else
+	__m128i temp = _mm_loadu_si128(cb);
+	temp = _mm_xor_si128(temp, chunk3);
+	temp = _mm_xor_si128(temp, chunk1);
+	_mm_storeu_si128(cb, temp);
+#endif
+       /* End of Variant 4 */
+}
+
+void cryptonight_hash_ctx(void *restrict output, const void *restrict input, int inlen,
+			  struct cryptonight_ctx *restrict ctx, uint64_t height)
+{
+	size_t i, j;
+	__attribute__ ((aligned(16))) __m128i expandedKey[10];
+
+	if (hp_jitfunc_memory == NULL)
+		alloc_jit_mem();
+
+	keccak((const uint8_t *)input, inlen, &ctx->state.hs.b[0], 200);
+	memcpy(ctx->text, ctx->state.init, INIT_SIZE_BYTE);
+
+	/* Variant 4 */
+	VARIANT4_RANDOM_MATH_INIT();
+	/* end of Variant 4 */
+
+#ifdef USE_AES_NI_KEY_EXPAND
+	__m128i ukey[2];
+	ukey[0] = _mm_loadu_si128(&ctx->state.hs.v[0]);
+	ukey[1] = _mm_loadu_si128(&ctx->state.hs.v[1]);
+
+	ExpandAESKey256(ukey, expandedKey);
+#else
+	ctx->aes_ctx = (oaes_ctx*) oaes_alloc();
+	oaes_key_import_data(ctx->aes_ctx, ctx->state.hs.b, AES_KEY_SIZE);
+#endif
+
+	for(i = 0; likely(i < MEMORY); i += INIT_SIZE_BYTE)
+	{
 		for(j = 0; j < 10; j++)
 		{
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x10], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x20], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x30], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x40], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x50], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x60], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x70], &ctx->aes_ctx->key->exp_data[j << 4]);
+#ifndef USE_AES_NI_KEY_EXPAND
+			expandedKey[j] = _mm_loadu_si128((__m128i *)&ctx->aes_ctx->key->exp_data[j << 4]);
+#endif
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x10], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x20], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x30], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x40], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x50], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x60], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x70], &expandedKey[j]);
 		}
 		memcpy(&ctx->long_state[i], ctx->text, INIT_SIZE_BYTE);
 	}
-	
-	for (i = 0; i < 2; i++) 
-    {
-	    ((uint64_t *)(ctx->a))[i] = ((uint64_t *)ctx->state.k)[i] ^  ((uint64_t *)ctx->state.k)[i+4];
-	    ((uint64_t *)(ctx->b))[i] = ((uint64_t *)ctx->state.k)[i+2] ^  ((uint64_t *)ctx->state.k)[i+6];
-    }
-	
-    VARIANT2_INIT64(ctx->b, ctx->state);
 
-    //xor_blocks_dst(&ctx->state.k[0], &ctx->state.k[32], ctx->a);
-    //xor_blocks_dst(&ctx->state.k[16], &ctx->state.k[48], ctx->b);
+#ifdef USE_AES_NI_KEY_EXPAND
 
-    for (i = 0; likely(i < ITER / 2); ++i) {
-        // Dependency chain: address -> read value ------+
-        // written value <-+ hard function (AES or MUL) <+
-        // next address  <-+
-        //
-        // Iteration 1 
-        SubAndShiftAndMixAddRound(ctx->c, &ctx->long_state[((uint64_t *)(ctx->a))[0] & 0x1FFFF0], ctx->a);
-        VARIANT2_PORTABLE_SHUFFLE_ADD(ctx->long_state, ((uint64_t *)(ctx->a))[0] & 0x1FFFF0, ctx->a, ctx->b);
-        xor_blocks_dst(ctx->c, ctx->b, &ctx->long_state[((uint64_t *)(ctx->a))[0] & 0x1FFFF0]);
-       VARIANT1_1(&ctx->long_state[((uint64_t *)(ctx->a))[0] & 0x1FFFF0]);
-        // Iteration 2 
-        {
-            uint64_t b[2];
-            b[0] = ((uint64_t*)&ctx->long_state[((uint64_t *)(ctx->c))[0] & 0x1FFFF0])[0];
-            b[1] = ((uint64_t*)&ctx->long_state[((uint64_t *)(ctx->c))[0] & 0x1FFFF0])[1];
-            VARIANT2_INTEGER_MATH_SSE2(b, ctx->c);
+	ukey[0] = _mm_loadu_si128(&ctx->state.hs.v[2]);
+	ukey[1] = _mm_loadu_si128(&ctx->state.hs.v[3]);
 
-            uint64_t hi, lo;
-            lo = mul128(((uint64_t *)ctx->c)[0], b[0], &hi);
-            VARIANT2_2(ctx->long_state, ((uint64_t *)(ctx->c))[0] & 0x1FFFF0);
-            VARIANT2_PORTABLE_SHUFFLE_ADD(ctx->long_state, ((uint64_t *)(ctx->c))[0] & 0x1FFFF0, ctx->a, ctx->b);
+#if __x86_64__
+	__m128i *xa = (__m128i *)&ctx->a;
+	__m128i *xb = (__m128i *)&ctx->b;
+	*xa = _mm_xor_si128(ukey[0], expandedKey[0]);
+	*xb = _mm_xor_si128(ukey[1], expandedKey[1]);
+#else
+	__m128i temp_a1 = _mm_xor_si128(ukey[0], expandedKey[0]);
+	__m128i temp_b1 = _mm_xor_si128(ukey[1], expandedKey[1]);
+	_mm_storeu_si128((__m128i *)&ctx->a, temp_a1);
+	_mm_storeu_si128((__m128i *)&ctx->b, temp_b1);
+#endif
 
-            hi += ((uint64_t *)ctx->a)[0];
-            lo += ((uint64_t *)ctx->a)[1];
+#else /* USE_AES_NI_KEY_EXPAND */
+	__m128i temp_a2 = _mm_loadu_si128(&ctx->state.hs.v[2]);
+	__m128i temp_b2 = _mm_loadu_si128(&ctx->state.hs.v[3]);
 
-            ((uint64_t *)ctx->a)[0] = b[0] ^ hi;
-            ((uint64_t *)ctx->a)[1] = b[1] ^ lo;
-            ((uint64_t*)&ctx->long_state[((uint64_t *)(ctx->c))[0] & 0x1FFFF0])[0] = hi;
-            ((uint64_t*)&ctx->long_state[((uint64_t *)(ctx->c))[0] & 0x1FFFF0])[1] = variant == 1 ? lo ^ tweak1_2 : lo;
-        }
-        memcpy(ctx->b + AES_BLOCK_SIZE, ctx->b, AES_BLOCK_SIZE);
-        memcpy(ctx->b, ctx->c, AES_BLOCK_SIZE);
-    }
+#if __x86_64__
+	__m128i *xa = (__m128i *)&ctx->a;
+	__m128i *xb = (__m128i *)&ctx->b;
+	*xa = _mm_xor_si128(expandedKey[0], temp_a2);
+	*xb = _mm_xor_si128(expandedKey[1], temp_b2);
+#else
+	temp_a2 = _mm_xor_si128(expandedKey[0], temp_a2);
+	temp_b2 = _mm_xor_si128(expandedKey[1], temp_b2);
+	_mm_storeu_si128((__m128i *)&ctx->a, temp_a2);
+	_mm_storeu_si128((__m128i *)&ctx->b, temp_b2);
+#endif
+#endif /* !USE_AES_NI_KEY_EXPAND */
 
-    memcpy(ctx->text, ctx->state.init, INIT_SIZE_BYTE);
-    oaes_key_import_data(ctx->aes_ctx, &ctx->state.hs.b[32], AES_KEY_SIZE);
-    
-    for(i = 0; likely(i < MEMORY); i += INIT_SIZE_BYTE)
-    {
+	/* Variant 2 */
+#if __x86_64__
+	__m128i dv = _mm_xor_si128(ctx->state.hs.v[4], ctx->state.hs.v[5]);
+#else
+	temp_a2 = _mm_loadu_si128(&ctx->state.hs.v[4]);
+	temp_b2 = _mm_loadu_si128(&ctx->state.hs.v[5]);
+	__m128i dv = _mm_xor_si128(temp_a2, temp_b2);
+#endif
+	/* end of Variant 2 */
+
+	for (i = 0; i < ITER / 4; ++i) {
+		// Dependency chain: address -> read value ------+
+		// written value <-+ hard function (AES or MUL) <+
+		// next address  <-+
+		//
+		// Iteration 1
+		SubAndShiftAndMixAddRound((__m128i *)ctx->c, &ctx->long_state[ctx->a[0] & 0x1FFFF0], (__m128i *)ctx->a);
+		shuffle_add(ctx->long_state, (ctx->a[0] & 0x1FFFF0), ctx->a, ctx->b, &dv, (__m128i *)ctx->c);
+		xor_blocks_dst(ctx->c, ctx->b, &ctx->long_state[ctx->a[0] & 0x1FFFF0]);
+		// Iteration 2
+		mul_sum_xor_dst(ctx->c, ctx->a, ctx->long_state, (ctx->c[0] & 0x1FFFF0), &dv, r, code, ctx->b);
+		// Iteration 3
+		SubAndShiftAndMixAddRound((__m128i *)ctx->b, &ctx->long_state[ctx->a[0] & 0x1FFFF0], (__m128i *)ctx->a);
+		shuffle_add(ctx->long_state, (ctx->a[0] & 0x1FFFF0), ctx->a, ctx->c, &dv, (__m128i *)ctx->b);
+		xor_blocks_dst(ctx->b, ctx->c, &ctx->long_state[ctx->a[0] & 0x1FFFF0]);
+		// Iteration 4
+		mul_sum_xor_dst(ctx->b, ctx->a, ctx->long_state, (ctx->b[0] & 0x1FFFF0), &dv, r, code, ctx->c);
+	}
+
+	memcpy(ctx->text, ctx->state.init, INIT_SIZE_BYTE);
+
+#ifdef USE_AES_NI_KEY_EXPAND
+	ExpandAESKey256(ukey, expandedKey);
+#else
+	oaes_key_import_data(ctx->aes_ctx, &ctx->state.hs.b[32], AES_KEY_SIZE);
+#endif
+	for(i = 0; likely(i < MEMORY); i += INIT_SIZE_BYTE)
+	{
 		xor_blocks(&ctx->text[0x00], &ctx->long_state[i + 0x00]);
 		xor_blocks(&ctx->text[0x10], &ctx->long_state[i + 0x10]);
 		xor_blocks(&ctx->text[0x20], &ctx->long_state[i + 0x20]);
@@ -280,25 +546,29 @@ int cryptonight_hash_ctx(void *restrict output, const void *restrict input, int 
 		xor_blocks(&ctx->text[0x50], &ctx->long_state[i + 0x50]);
 		xor_blocks(&ctx->text[0x60], &ctx->long_state[i + 0x60]);
 		xor_blocks(&ctx->text[0x70], &ctx->long_state[i + 0x70]);
-		
+
 		for(j = 0; j < 10; j++)
 		{
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x10], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x20], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x30], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x40], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x50], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x60], &ctx->aes_ctx->key->exp_data[j << 4]);
-			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x70], &ctx->aes_ctx->key->exp_data[j << 4]);
+#ifndef USE_AES_NI_KEY_EXPAND
+			expandedKey[j] = _mm_loadu_si128((__m128i *)&ctx->aes_ctx->key->exp_data[j << 4]);
+#endif
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x10], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x20], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x30], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x40], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x50], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x60], &expandedKey[j]);
+			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x70], &expandedKey[j]);
 		}
 	}
-		
-    memcpy(ctx->state.init, ctx->text, INIT_SIZE_BYTE);
-    //hash_permutation(&ctx->state.hs);
-    keccakf(&ctx->state.hs, 24);
-    /*memcpy(hash, &state, 32);*/
-    extra_hashes[ctx->state.hs.b[0] & 3](&ctx->state, 200, output);
-    oaes_free((OAES_CTX **) &ctx->aes_ctx);
-    return 1;
+#ifndef USE_AES_NI_KEY_EXPAND
+	oaes_free((OAES_CTX **) &ctx->aes_ctx);
+#endif
+	if (hp_jitfunc_memory)
+		free_jit_mem();
+
+	memcpy(ctx->state.init, ctx->text, INIT_SIZE_BYTE);
+	keccakf(&ctx->state.hs.w[0]);
+	extra_hashes[ctx->state.hs.b[0] & 3](&ctx->state, 200, output);
 }

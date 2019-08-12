@@ -17,7 +17,7 @@ This is a multi-threaded CPU miner, fork of [LucasJones](//github.com/lucasjones
 Algorithms
 ==========
 #### Currently supported
- * ✓ __cryptonight__ (Bytecoin [BCN], Monero)
+ * ✓ __cryptonightR__ (Monero)
 
 Dependencies
 ============
@@ -38,6 +38,8 @@ Build
  * Optimal GCC flags are built in - you only need to use -march=native if you want it
  * CFLAGS="*-march=native*" ./configure
    * # Use -march=native if building for a single machine
+ * If you don't have AES-NI or if you are compiling for 32bit, add --disable-aes-ni to ./configure
+   * ./configure --disable-aes-ni
  * make
 
 #### Architecture-specific notes:
@@ -47,6 +49,8 @@ Build
 Usage instructions
 ==================
 Run "minerd --help" to see options.
+
+For better performance, allocate 2 hugepages per thread.
 
 ### Connecting through a proxy
 

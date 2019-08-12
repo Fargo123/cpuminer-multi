@@ -120,7 +120,6 @@ enum mining_algo {
     ALGO_BLAKE,       /* Blake */
     ALGO_X11,         /* X11 */
     ALGO_CRYPTONIGHT, /* CryptoNight */
-    ALGO_CRYPTONIGHT_MONERO, /* CryptoNight with Monero tweaks */
 };
 
 static const char *algo_names[] = {
@@ -134,7 +133,6 @@ static const char *algo_names[] = {
     [ALGO_BLAKE] =       "blake",
     [ALGO_X11] =         "x11",
     [ALGO_CRYPTONIGHT] = "cryptonight",
-    [ALGO_CRYPTONIGHT_MONERO] = "cryptonight-monero",
 };
 
 bool opt_debug = false;
@@ -156,8 +154,8 @@ bool jsonrpc_2 = false;
 int opt_timeout = 0;
 static int opt_scantime = 5;
 static json_t *opt_config;
-static const bool opt_time = true;
-static enum mining_algo opt_algo = ALGO_CRYPTONIGHT_MONERO;
+//static const bool opt_time = true;
+static enum mining_algo opt_algo = ALGO_CRYPTONIGHT;
 static int opt_n_threads;
 static int num_processors;
 static char *rpc_url;
@@ -174,10 +172,11 @@ int daemon_thr_id = -1;
 struct work_restart *work_restart = NULL;
 static struct stratum_ctx stratum;
 static char rpc2_id[64] = "";
-static char *rpc2_blob = NULL;
+static unsigned char *rpc2_blob = NULL;
 static int rpc2_bloblen = 0;
 static uint32_t rpc2_target = 0;
 static char *rpc2_job_id = NULL;
+static uint64_t blk_height;
 
 pthread_mutex_t applog_lock;
 static pthread_mutex_t stats_lock;
@@ -270,6 +269,7 @@ static struct option const options[] = {
 #ifdef HAVE_SYSLOG_H
         { "syslog", 0, NULL, 'S' },
 #endif
+        { "test", 0, NULL, 1002 },
         { "threads", 1, NULL, 't' },
         { "timeout", 1, NULL, 'T' },
         { "url", 1, NULL, 'o' },
@@ -407,7 +407,7 @@ bool rpc2_job_decode(const json_t *job, struct work *work) {
     }
     if (blobLen != 0) {
         pthread_mutex_lock(&rpc2_job_lock);
-        char *blob = malloc(blobLen / 2);
+        unsigned char *blob = malloc(blobLen / 2);
         if (!hex2bin(blob, hexblob, blobLen / 2)) {
             applog(LOG_ERR, "JSON inval blob");
             pthread_mutex_unlock(&rpc2_job_lock);
@@ -440,6 +440,17 @@ bool rpc2_job_decode(const json_t *job, struct work *work) {
         }
         rpc2_job_id = strdup(job_id);
         pthread_mutex_unlock(&rpc2_job_lock);
+    }
+    tmp = json_object_get(job, "height");
+    if (!tmp) {
+        applog(LOG_ERR, "JSON invalid block height");
+        goto err_out;
+    }
+    blk_height = json_integer_value(tmp);
+    applog(LOG_INFO, "Block height is %"PRIu64"", blk_height);
+    if (!blk_height) {
+        applog(LOG_ERR, "JSON invalid block height value");
+        goto err_out;
     }
     if(work) {
         if (!rpc2_blob) {
@@ -480,6 +491,19 @@ static bool work_decode(const json_t *val, struct work *work) {
         work->data[i] = le32dec(work->data + i);
     for (i = 0; i < ARRAY_SIZE(work->target); i++)
         work->target[i] = le32dec(work->target + i);
+
+    json_t *tmp;
+    tmp = json_object_get(val, "height");
+    if (!tmp) {
+        applog(LOG_ERR, "JSON inval block height");
+        goto err_out;
+    }
+    blk_height = json_integer_value(tmp);
+    applog(LOG_INFO, "Block height is %"PRIu64"", blk_height);
+    if (!blk_height) {
+        applog(LOG_ERR, "JSON inval block height value");
+        goto err_out;
+    }
 
     return true;
 
@@ -547,7 +571,6 @@ static void share_result(int result, struct work *work, const char *reason) {
 
     switch (opt_algo) {
     case ALGO_CRYPTONIGHT:
-    case ALGO_CRYPTONIGHT_MONERO:
         applog(LOG_INFO, "accepted: %lu/%lu (%.2f%%), %.2f H/s at diff %g %s",
                 accepted_count, accepted_count + rejected_count,
                 100. * accepted_count / (accepted_count + rejected_count), hashrate,
@@ -574,7 +597,6 @@ static bool submit_upstream_work(CURL *curl, struct work *work) {
     char s[BIG_BUF_LEN];
     int i;
     bool rc = false;
-    bool is_monero = opt_algo == ALGO_CRYPTONIGHT_MONERO;
 
     /* pass if the previous hash is not the current previous hash */
     if (!submit_old && memcmp(work->data + 1, g_work.data + 1, 32)) {
@@ -586,20 +608,14 @@ static bool submit_upstream_work(CURL *curl, struct work *work) {
     if (have_stratum) {
         uint32_t ntime, nonce;
         char *ntimestr, *noncestr, *xnonce2str;
-        int variant;
 
         if (jsonrpc_2) {
-            variant = is_monero && ((const unsigned char*)work->data)[0] >= 7 ? ((const unsigned char*)work->data)[0] - 6 : 0;
             noncestr = bin2hex(((const unsigned char*)work->data) + 39, 4);
-            char hash[32];
+            unsigned char hash[32];
             switch(opt_algo) {
             case ALGO_CRYPTONIGHT:
-            case ALGO_CRYPTONIGHT_MONERO:
             default:
-                if (!cryptonight_hash(hash, work->data, work->dlen, variant)) {
-                    applog(LOG_ERR, "submit_upstream_work cryptonight_hash failed");
-                    goto out;
-                }
+                cryptonight_hash(hash, work->data, work->dlen, blk_height);
             }
             char *hashhex = bin2hex(hash, 32);
             snprintf(s, JSON_BUF_LEN,
@@ -625,7 +641,6 @@ static bool submit_upstream_work(CURL *curl, struct work *work) {
             goto out;
         }
     } else if (have_daemon) {
-        int variant = is_monero && ((const unsigned char*)work->data)[0] >= 7 ? ((const unsigned char*)work->data)[0] - 6 : 0;
         char *noncestr;
         time_t work_time;
         pthread_mutex_lock(&g_work_lock);
@@ -665,17 +680,12 @@ static bool submit_upstream_work(CURL *curl, struct work *work) {
     } else {
         /* build JSON-RPC request */
         if(jsonrpc_2) {
-            int variant = is_monero && ((const unsigned char*)work->data)[0] >= 7 ? ((const unsigned char*)work->data)[0] - 6 : 0;
             char *noncestr = bin2hex(((const unsigned char*)work->data) + 39, 4);
-            char hash[32];
+            unsigned char hash[32];
             switch(opt_algo) {
             case ALGO_CRYPTONIGHT:
-            case ALGO_CRYPTONIGHT_MONERO:
             default:
-                if (!cryptonight_hash(hash, work->data, work->dlen, variant)) {
-                    applog(LOG_ERR, "submit_upstream_work cryptonight_hash failed");
-                    goto out;
-                }
+                cryptonight_hash(hash, work->data, work->dlen, blk_height);
             }
             char *hashhex = bin2hex(hash, 32);
             snprintf(s, JSON_BUF_LEN,
@@ -786,7 +796,7 @@ static bool rpc2_login(CURL *curl) {
     gettimeofday(&tv_end, NULL );
 
     if (!val)
-        goto end;
+        goto fail;
 
 //    applog(LOG_DEBUG, "JSON value: %s", json_dumps(val, 0));
 
@@ -794,12 +804,12 @@ static bool rpc2_login(CURL *curl) {
 
     json_t *result = json_object_get(val, "result");
 
-    if(!result) goto end;
+    if(!result) goto fail;
 
     json_t *job = json_object_get(result, "job");
 
     if(!rpc2_job_decode(job, &g_work)) {
-        goto end;
+        goto fail;
     }
 
     if (opt_debug && rc) {
@@ -810,8 +820,10 @@ static bool rpc2_login(CURL *curl) {
 
     json_decref(val);
 
-    end:
     return rc;
+
+    fail:
+    return rc = false;
 }
 
 static void workio_cmd_free(struct workio_cmd *wc) {
@@ -1016,8 +1028,8 @@ static bool submit_work(struct thr_info *thr, const struct work *work_in) {
 }
 
 static void stratum_gen_work(struct stratum_ctx *sctx, struct work *work) {
-    unsigned char merkle_root[64];
-    int i;
+//    unsigned char merkle_root[64];
+//    int i;
 
     pthread_mutex_lock(&sctx->work_lock);
 
@@ -1080,9 +1092,9 @@ static void *miner_thread(void *userdata) {
     struct work work = { { 0 } };
     uint32_t max_nonce;
     uint32_t end_nonce = 0xffffffffU / opt_n_threads * (thr_id + 1) - 0x20;
-    unsigned char *scratchbuf = NULL;
-    char s[16];
-    int i;
+//    unsigned char *scratchbuf = NULL;
+//    char s[16];
+//    int i;
 	struct cryptonight_ctx *persistentctx;
 	
     /* Set worker threads to nice 19 and then preferentially to SCHED_IDLE
@@ -1106,7 +1118,7 @@ static void *miner_thread(void *userdata) {
     }*/
     
 	persistentctx = persistentctxs[thr_id];
-	if(!persistentctx && (opt_algo == ALGO_CRYPTONIGHT || opt_algo == ALGO_CRYPTONIGHT_MONERO))
+	if(!persistentctx && opt_algo == ALGO_CRYPTONIGHT)
 	{
 		#if defined __unix__ && (!defined __APPLE__) && (!defined DISABLE_LINUX_HUGEPAGES)
 		persistentctx = (struct cryptonight_ctx *)mmap(0, sizeof(struct cryptonight_ctx), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, 0, 0);
@@ -1135,7 +1147,7 @@ static void *miner_thread(void *userdata) {
             pthread_mutex_lock(&g_work_lock);
             if ((*nonceptr) >= end_nonce
            	    && !(jsonrpc_2 ? memcmp(work.data, g_work.data, 39) ||
-           	            memcmp(((uint8_t*) work.data) + 43, ((uint8_t*) g_work.data) + 43, work.dlen-43)
+                           memcmp(((uint8_t*) work.data) + 43, ((uint8_t*) g_work.data) + 43, work.dlen-43)
            	      : memcmp(work.data, g_work.data, 76)))
                 stratum_gen_work(&stratum, &g_work);
         } else if (have_daemon) {
@@ -1183,7 +1195,7 @@ static void *miner_thread(void *userdata) {
                 max64 = 0xfffLL;
                 break;
             case ALGO_CRYPTONIGHT:
-            case ALGO_CRYPTONIGHT_MONERO:
+
                 max64 = 0x40LL;
                 break;
             default:
@@ -1200,8 +1212,11 @@ static void *miner_thread(void *userdata) {
         gettimeofday(&tv_start, NULL );
 
         /* scan nonces for a proof-of-work hash */
+        if (blk_height)
             rc = scanhash_cryptonight(thr_id, work.data, work.dlen, work.target,
-                    max_nonce, &hashes_done, persistentctx);
+                                      max_nonce, &hashes_done, persistentctx, blk_height);
+        else
+            rc = 0;
 
         /* record scanhash elapsed time */
         gettimeofday(&tv_end, NULL );
@@ -1215,7 +1230,6 @@ static void *miner_thread(void *userdata) {
         /*if (!opt_quiet) {
             switch(opt_algo) {
             case ALGO_CRYPTONIGHT:
-            case ALGO_CRYPTONIGHT_MONERO:
                 applog(LOG_INFO, "thread %d: %lu hashes, %.2f H/s", thr_id,
                         hashes_done, thr_hashrates[thr_id]);
                 break;
@@ -1234,7 +1248,6 @@ static void *miner_thread(void *userdata) {
             if (i == opt_n_threads) {
                 switch(opt_algo) {
                 case ALGO_CRYPTONIGHT:
-                case ALGO_CRYPTONIGHT_MONERO:
                     applog(LOG_INFO, "Total: %s H/s", hashrate);
                     break;
                 default:
@@ -1413,6 +1426,7 @@ static void *daemon_thread(void *userdata) {
                 jheight = json_object_get(result, "height");
                 if (jheight) {
                     height = json_integer_value(jheight);
+                    blk_height = height;
                     const char *tmpl = json_string_value(json_object_get(result, "blocktemplate_blob"));
                     const char *hasher = json_string_value(json_object_get(result, "blockhashing_blob"));
                     uint64_t diff = json_integer_value(json_object_get(result, "difficulty"));
@@ -1426,7 +1440,7 @@ static void *daemon_thread(void *userdata) {
                     g_work.target[6] = diff & 0xffffffff;
                     g_work.target[7] = diff >> 32;
                     free(g_work.xnonce2);
-                    g_work.xnonce2 = strdup(tmpl);
+                    g_work.xnonce2 = (unsigned char *)strdup(tmpl);
                     g_work.xnonce2_len = strlen(tmpl)+1;
                     prevheight = height;
                     time(&g_work_time);
@@ -1441,6 +1455,7 @@ static void *daemon_thread(void *userdata) {
                 jheight = json_object_get(result, "count");
                 if (jheight) {
                     height = json_integer_value(jheight);
+                    blk_height = height;
                     if (height != prevheight) {
                         newblock = 1;
                         json_decref(val);
@@ -1815,6 +1830,10 @@ static void parse_arg(int key, char *arg) {
         free(opt_cert);
         opt_cert = strdup(arg);
         break;
+    case 1002:
+        xmr_hash_test();
+        exit(0);
+        break;
     case 1005:
         opt_benchmark = true;
         want_longpoll = false;
@@ -1905,7 +1924,7 @@ static void signal_handler(int sig) {
     case SIGINT:
         applog(LOG_INFO, "SIGINT received, exiting");
         #if defined __unix__ && (!defined __APPLE__)
-		if(opt_algo == ALGO_CRYPTONIGHT || opt_algo == ALGO_CRYPTONIGHT_MONERO)
+		if(opt_algo == ALGO_CRYPTONIGHT)
 			for(i = 0; i < opt_n_threads; i++) munmap(persistentctxs[i], sizeof(struct cryptonight_ctx));
 		#endif
         exit(0);
@@ -1913,7 +1932,7 @@ static void signal_handler(int sig) {
     case SIGTERM:
         applog(LOG_INFO, "SIGTERM received, exiting");
         #if defined __unix__ && (!defined __APPLE__)
-		if(opt_algo == ALGO_CRYPTONIGHT || opt_algo == ALGO_CRYPTONIGHT_MONERO)
+		if(opt_algo == ALGO_CRYPTONIGHT)
 			for(i = 0; i < opt_n_threads; i++) munmap(persistentctxs[i], sizeof(struct cryptonight_ctx));
 		#endif
         exit(0);
@@ -1924,11 +1943,11 @@ static void signal_handler(int sig) {
 
 int main(int argc, char *argv[]) {
     struct thr_info *thr;
-    unsigned int tmp1, tmp2, tmp3, tmp4;
     long flags;
     int i;
 	
 	#ifndef USE_LOBOTOMIZED_AES
+	unsigned int tmp1, tmp2, tmp3, tmp4;
 	// If the CPU doesn't support CPUID feature
 	// flags, it's WAY too old to have AES-NI
 	if(__get_cpuid_max(0, &tmp1) < 1)
@@ -2044,9 +2063,9 @@ int main(int argc, char *argv[]) {
     thr_hashrates = (double *) calloc(opt_n_threads, sizeof(double));
     if (!thr_hashrates)
         return 1;
-	
-	thr_times = (double *)calloc(opt_n_threads, sizeof(double));
-	
+
+    thr_times = (double *)calloc(opt_n_threads, sizeof(double));
+
     /* init workio thread info */
     work_thr_id = opt_n_threads;
     thr = &thr_info[work_thr_id];
@@ -2133,7 +2152,7 @@ int main(int argc, char *argv[]) {
 
     applog(LOG_INFO, "workio thread dead, exiting.");
 	#if defined __unix__ && (!defined __APPLE__)
-	if(opt_algo == ALGO_CRYPTONIGHT || opt_algo == ALGO_CRYPTONIGHT_MONERO)
+	if(opt_algo == ALGO_CRYPTONIGHT)
 		for(i = 0; i < opt_n_threads; i++) munmap(persistentctxs[i], sizeof(struct cryptonight_ctx));
 	#endif
     return 0;
