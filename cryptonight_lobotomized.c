@@ -64,7 +64,26 @@ static inline void free_jit_mem(void)
 	hp_jitfunc_allocated = 0;
 }
 
-const uint32_t TestTable1[256]  __attribute((aligned(16))) ={
+static const uint8_t sbox[256] = {
+    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16
+};
+
+static const uint32_t TestTable1[256]  __attribute((aligned(16))) = {
     0xA56363C6,0x847C7CF8,0x997777EE,0x8D7B7BF6,0x0DF2F2FF,0xBD6B6BD6,0xB16F6FDE,0x54C5C591,
     0x50303060,0x03010102,0xA96767CE,0x7D2B2B56,0x19FEFEE7,0x62D7D7B5,0xE6ABAB4D,0x9A7676EC,
     0x45CACA8F,0x9D82821F,0x40C9C989,0x877D7DFA,0x15FAFAEF,0xEB5959B2,0xC947478E,0x0BF0F0FB,
@@ -99,7 +118,7 @@ const uint32_t TestTable1[256]  __attribute((aligned(16))) ={
     0xC3414182,0xB0999929,0x772D2D5A,0x110F0F1E,0xCBB0B07B,0xFC5454A8,0xD6BBBB6D,0x3A16162C
 };
 
-const uint32_t TestTable2[256]  __attribute((aligned(16))) ={
+static const uint32_t TestTable2[256]  __attribute((aligned(16))) = {
     0x6363C6A5,0x7C7CF884,0x7777EE99,0x7B7BF68D,0xF2F2FF0D,0x6B6BD6BD,0x6F6FDEB1,0xC5C59154,
     0x30306050,0x01010203,0x6767CEA9,0x2B2B567D,0xFEFEE719,0xD7D7B562,0xABAB4DE6,0x7676EC9A,
     0xCACA8F45,0x82821F9D,0xC9C98940,0x7D7DFA87,0xFAFAEF15,0x5959B2EB,0x47478EC9,0xF0F0FB0B,
@@ -134,7 +153,7 @@ const uint32_t TestTable2[256]  __attribute((aligned(16))) ={
     0x414182C3,0x999929B0,0x2D2D5A77,0x0F0F1E11,0xB0B07BCB,0x5454A8FC,0xBBBB6DD6,0x16162C3A
 };
 
-const uint32_t TestTable3[256]  __attribute((aligned(16))) ={
+static const uint32_t TestTable3[256]  __attribute((aligned(16))) = {
     0x63C6A563,0x7CF8847C,0x77EE9977,0x7BF68D7B,0xF2FF0DF2,0x6BD6BD6B,0x6FDEB16F,0xC59154C5,
     0x30605030,0x01020301,0x67CEA967,0x2B567D2B,0xFEE719FE,0xD7B562D7,0xAB4DE6AB,0x76EC9A76,
     0xCA8F45CA,0x821F9D82,0xC98940C9,0x7DFA877D,0xFAEF15FA,0x59B2EB59,0x478EC947,0xF0FB0BF0,
@@ -169,7 +188,7 @@ const uint32_t TestTable3[256]  __attribute((aligned(16))) ={
     0x4182C341,0x9929B099,0x2D5A772D,0x0F1E110F,0xB07BCBB0,0x54A8FC54,0xBB6DD6BB,0x162C3A16
 };
 
-const uint32_t TestTable4[256]  __attribute((aligned(16))) ={
+static const uint32_t TestTable4[256]  __attribute((aligned(16))) = {
     0xC6A56363,0xF8847C7C,0xEE997777,0xF68D7B7B,0xFF0DF2F2,0xD6BD6B6B,0xDEB16F6F,0x9154C5C5,
     0x60503030,0x02030101,0xCEA96767,0x567D2B2B,0xE719FEFE,0xB562D7D7,0x4DE6ABAB,0xEC9A7676,
     0x8F45CACA,0x1F9D8282,0x8940C9C9,0xFA877D7D,0xEF15FAFA,0xB2EB5959,0x8EC94747,0xFB0BF0F0,
@@ -204,8 +223,54 @@ const uint32_t TestTable4[256]  __attribute((aligned(16))) ={
     0x82C34141,0x29B09999,0x5A772D2D,0x1E110F0F,0x7BCBB0B0,0xA8FC5454,0x6DD6BBBB,0x2C3A1616
 };
 
-// #define USE_AES_NI_KEY_EXPAND
-#ifdef USE_AES_NI_KEY_EXPAND
+/* Emulate AES-NI keygen assist instruction
+ * Synopsis
+ * __m128i _mm_aeskeygenassist_si128 (__m128i a, const int imm8)
+ * #include <wmmintrin.h>
+ * Instruction: aeskeygenassist xmm, xmm, imm
+ * CPUID Flags: AES
+ * Description
+ * Assist in expanding the AES cipher key by computing steps towards generating a round key
+ * for encryption cipher using data from a and an 8-bit round constant specified
+ * in imm8, and store the result in dst."
+ * Operation
+ * X3[31:0] := a[127:96]
+ * X2[31:0] := a[95:64]
+ * X1[31:0] := a[63:32]
+ * X0[31:0] := a[31:0]
+ * RCON[31:0] := ZeroExtend(imm8[7:0])
+ * dst[31:0] := SubWord(X1)
+ * dst[63:32] := RotWord(SubWord(X1)) XOR RCON
+ * dst[95:64] := SubWord(X3)
+ * dst[127:96] := RotWord(SubWord(X3)) XOR RCON
+ */
+static inline __m128i aeskeygenassist_emu(__m128i a, const uint8_t imm8)
+{
+	uint8_t X[8];
+
+#if __x86_64__	/* Extract word X1 and X3 */
+	*(uint64_t *)X = _mm_cvtsi128_si64(_mm_shuffle_epi32(a, 0XFF));
+#else
+	*(uint32_t *)&X[4] = _mm_cvtsi128_si32(_mm_shuffle_epi32(a, 0X55));
+	*(uint32_t *)&X[0] = _mm_cvtsi128_si32(_mm_shuffle_epi32(a, 0XFF));
+#endif
+	/* Subword X1 */
+	const uint8_t temp0 = sbox[X[4]];
+	const uint8_t temp1 = sbox[X[5]];
+	const uint8_t temp2 = sbox[X[6]];
+	const uint8_t temp3 = sbox[X[7]];
+
+	/* Subword X3 */
+	const uint8_t temp8 = sbox[X[0]];
+	const uint8_t temp9 = sbox[X[1]];
+	const uint8_t temp10 = sbox[X[2]];
+	const uint8_t temp11 = sbox[X[3]];
+
+	/* Rotword(Subword(X1)) XOR RCON, Rotword(Subword(X3)) XOR RCON */
+	return _mm_set_epi8(temp8, temp11, temp10, temp9 ^ imm8, temp11, temp10, temp9, temp8,
+			    temp0, temp3, temp2, temp1 ^ imm8, temp3, temp2, temp1, temp0);
+}
+
 static inline void ExpandAESKey256_sub1(__m128i *tmp1, __m128i *tmp2)
 {
 	__m128i tmp4;
@@ -223,7 +288,7 @@ static inline void ExpandAESKey256_sub2(__m128i *tmp1, __m128i *tmp3)
 {
 	__m128i tmp2, tmp4;
 	
-	tmp4 = _mm_aeskeygenassist_si128(*tmp1, 0x00);
+	tmp4 = aeskeygenassist_emu(*tmp1, 0x00);
 	tmp2 = _mm_shuffle_epi32(tmp4, 0xAA);
 	tmp4 = _mm_slli_si128(*tmp3, 0x04);
 	*tmp3 = _mm_xor_si128(*tmp3, tmp4);
@@ -244,64 +309,41 @@ static inline void ExpandAESKey256(const __m128i *userkey, __m128i *keys)
 	keys[0] = tmp1;
 	keys[1] = tmp3;
 
-	tmp2 = _mm_aeskeygenassist_si128(tmp3, 0x01);
+	tmp2 = aeskeygenassist_emu(tmp3, 0x01);
 	ExpandAESKey256_sub1(&tmp1, &tmp2);
 	keys[2] = tmp1;
 	ExpandAESKey256_sub2(&tmp1, &tmp3);
 	keys[3] = tmp3;
 
-	tmp2 = _mm_aeskeygenassist_si128(tmp3, 0x02);
+	tmp2 = aeskeygenassist_emu(tmp3, 0x02);
 	ExpandAESKey256_sub1(&tmp1, &tmp2);
 	keys[4] = tmp1;
 	ExpandAESKey256_sub2(&tmp1, &tmp3);
 	keys[5] = tmp3;
 
-	tmp2 = _mm_aeskeygenassist_si128(tmp3, 0x04);
+	tmp2 = aeskeygenassist_emu(tmp3, 0x04);
 	ExpandAESKey256_sub1(&tmp1, &tmp2);
 	keys[6] = tmp1;
 	ExpandAESKey256_sub2(&tmp1, &tmp3);
 	keys[7] = tmp3;
 
-	tmp2 = _mm_aeskeygenassist_si128(tmp3, 0x08);
+	tmp2 = aeskeygenassist_emu(tmp3, 0x08);
 	ExpandAESKey256_sub1(&tmp1, &tmp2);
 	keys[8] = tmp1;
 	ExpandAESKey256_sub2(&tmp1, &tmp3);
 	keys[9] = tmp3;
 }
-#endif
 
 static inline void SubAndShiftAndMixAddRound(__m128i *restrict out, uint8_t *in, __m128i *restrict AesEncKey)
 {
 	uint8_t state[16] __attribute__ ((aligned(16)));
+
 	memcpy(state, in, 16);
 
-	uint32_t tmp1 = TestTable1[state[0]];
-	uint32_t tmp2 = TestTable4[state[3]];
-	uint32_t tmp3 = TestTable3[state[2]];
-	uint32_t tmp4 = TestTable2[state[1]];
-
-	__m128i temp1 = _mm_setr_epi32(tmp1, tmp2, tmp3, tmp4);
-
-	uint32_t tmp5 = TestTable2[state[5]];
-	uint32_t tmp6 = TestTable1[state[4]];
-	uint32_t tmp7 = TestTable4[state[7]];
-	uint32_t tmp8 = TestTable3[state[6]];
-
-	__m128i temp2 = _mm_setr_epi32(tmp5, tmp6, tmp7, tmp8);
-
-	tmp1 = TestTable3[state[10]];
-	tmp2 = TestTable2[state[9]];
-	tmp3 = TestTable1[state[8]];
-	tmp4 = TestTable4[state[11]];
-
-	__m128i temp3 = _mm_setr_epi32(tmp1, tmp2, tmp3, tmp4);
-
-	tmp5 = TestTable4[state[15]];
-	tmp6 = TestTable3[state[14]];
-	tmp7 = TestTable2[state[13]];
-	tmp8 = TestTable1[state[12]];
-
-	__m128i temp4 = _mm_setr_epi32(tmp5, tmp6, tmp7, tmp8);
+	__m128i temp1 = _mm_setr_epi32(TestTable1[state[0]], TestTable4[state[3]], TestTable3[state[2]], TestTable2[state[1]]);
+	__m128i temp2 = _mm_setr_epi32(TestTable2[state[5]], TestTable1[state[4]], TestTable4[state[7]], TestTable3[state[6]]);
+	__m128i temp3 = _mm_setr_epi32(TestTable3[state[10]], TestTable2[state[9]], TestTable1[state[8]], TestTable4[state[11]]);
+	__m128i temp4 = _mm_setr_epi32(TestTable4[state[15]], TestTable3[state[14]], TestTable2[state[13]], TestTable1[state[12]]);
 
 	temp2 = _mm_xor_si128(temp2, temp1);
 	temp2 = _mm_xor_si128(temp2, temp3);
@@ -436,24 +478,16 @@ void cryptonight_hash_ctx(void *restrict output, const void *restrict input, int
 	VARIANT4_RANDOM_MATH_INIT();
 	/* end of Variant 4 */
 
-#ifdef USE_AES_NI_KEY_EXPAND
 	__m128i ukey[2];
 	ukey[0] = _mm_loadu_si128(&ctx->state.hs.v[0]);
 	ukey[1] = _mm_loadu_si128(&ctx->state.hs.v[1]);
 
 	ExpandAESKey256(ukey, expandedKey);
-#else
-	ctx->aes_ctx = (oaes_ctx*) oaes_alloc();
-	oaes_key_import_data(ctx->aes_ctx, ctx->state.hs.b, AES_KEY_SIZE);
-#endif
 
 	for(i = 0; likely(i < MEMORY); i += INIT_SIZE_BYTE)
 	{
 		for(j = 0; j < 10; j++)
 		{
-#ifndef USE_AES_NI_KEY_EXPAND
-			expandedKey[j] = _mm_loadu_si128((__m128i *)&ctx->aes_ctx->key->exp_data[j << 4]);
-#endif
 			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0], &expandedKey[j]);
 			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x10], &expandedKey[j]);
 			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x20], &expandedKey[j]);
@@ -465,8 +499,6 @@ void cryptonight_hash_ctx(void *restrict output, const void *restrict input, int
 		}
 		memcpy(&ctx->long_state[i], ctx->text, INIT_SIZE_BYTE);
 	}
-
-#ifdef USE_AES_NI_KEY_EXPAND
 
 	ukey[0] = _mm_loadu_si128(&ctx->state.hs.v[2]);
 	ukey[1] = _mm_loadu_si128(&ctx->state.hs.v[3]);
@@ -483,30 +515,13 @@ void cryptonight_hash_ctx(void *restrict output, const void *restrict input, int
 	_mm_storeu_si128((__m128i *)&ctx->b, temp_b1);
 #endif
 
-#else /* USE_AES_NI_KEY_EXPAND */
-	__m128i temp_a2 = _mm_loadu_si128(&ctx->state.hs.v[2]);
-	__m128i temp_b2 = _mm_loadu_si128(&ctx->state.hs.v[3]);
-
-#if __x86_64__
-	__m128i *xa = (__m128i *)&ctx->a;
-	__m128i *xb = (__m128i *)&ctx->b;
-	*xa = _mm_xor_si128(expandedKey[0], temp_a2);
-	*xb = _mm_xor_si128(expandedKey[1], temp_b2);
-#else
-	temp_a2 = _mm_xor_si128(expandedKey[0], temp_a2);
-	temp_b2 = _mm_xor_si128(expandedKey[1], temp_b2);
-	_mm_storeu_si128((__m128i *)&ctx->a, temp_a2);
-	_mm_storeu_si128((__m128i *)&ctx->b, temp_b2);
-#endif
-#endif /* !USE_AES_NI_KEY_EXPAND */
-
 	/* Variant 2 */
 #if __x86_64__
 	__m128i dv = _mm_xor_si128(ctx->state.hs.v[4], ctx->state.hs.v[5]);
 #else
-	temp_a2 = _mm_loadu_si128(&ctx->state.hs.v[4]);
-	temp_b2 = _mm_loadu_si128(&ctx->state.hs.v[5]);
-	__m128i dv = _mm_xor_si128(temp_a2, temp_b2);
+	temp_a1 = _mm_loadu_si128(&ctx->state.hs.v[4]);
+	temp_b1 = _mm_loadu_si128(&ctx->state.hs.v[5]);
+	__m128i dv = _mm_xor_si128(temp_a1, temp_b1);
 #endif
 	/* end of Variant 2 */
 
@@ -531,11 +546,8 @@ void cryptonight_hash_ctx(void *restrict output, const void *restrict input, int
 
 	memcpy(ctx->text, ctx->state.init, INIT_SIZE_BYTE);
 
-#ifdef USE_AES_NI_KEY_EXPAND
 	ExpandAESKey256(ukey, expandedKey);
-#else
-	oaes_key_import_data(ctx->aes_ctx, &ctx->state.hs.b[32], AES_KEY_SIZE);
-#endif
+
 	for(i = 0; likely(i < MEMORY); i += INIT_SIZE_BYTE)
 	{
 		xor_blocks(&ctx->text[0x00], &ctx->long_state[i + 0x00]);
@@ -549,9 +561,6 @@ void cryptonight_hash_ctx(void *restrict output, const void *restrict input, int
 
 		for(j = 0; j < 10; j++)
 		{
-#ifndef USE_AES_NI_KEY_EXPAND
-			expandedKey[j] = _mm_loadu_si128((__m128i *)&ctx->aes_ctx->key->exp_data[j << 4]);
-#endif
 			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0], &expandedKey[j]);
 			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x10], &expandedKey[j]);
 			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x20], &expandedKey[j]);
@@ -562,9 +571,7 @@ void cryptonight_hash_ctx(void *restrict output, const void *restrict input, int
 			SubAndShiftAndMixAddRoundInPlace(&ctx->text[0x70], &expandedKey[j]);
 		}
 	}
-#ifndef USE_AES_NI_KEY_EXPAND
-	oaes_free((OAES_CTX **) &ctx->aes_ctx);
-#endif
+
 	if (hp_jitfunc_memory)
 		free_jit_mem();
 
