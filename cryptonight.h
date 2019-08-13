@@ -3,7 +3,6 @@
 
 #include <stddef.h>
 #include <x86intrin.h>
-#include "crypto/oaes_lib.h"
 #include "miner.h"
 
 #define MEMORY         (1 << 21) /* 2 MiB */
@@ -52,9 +51,6 @@ struct cryptonight_ctx {
     uint64_t a[AES_BLOCK_SIZE >> 3] __attribute__((aligned(16)));
     uint64_t b[AES_BLOCK_SIZE >> 3] __attribute__((aligned(16)));
     uint64_t c[AES_BLOCK_SIZE >> 3] __attribute__((aligned(16)));
-#if 1
-    oaes_ctx* aes_ctx;
-#endif
 } __attribute__((__may_alias__));
 
 #else
