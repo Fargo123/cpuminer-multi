@@ -1426,7 +1426,6 @@ static void *daemon_thread(void *userdata) {
                 jheight = json_object_get(result, "height");
                 if (jheight) {
                     height = json_integer_value(jheight);
-                    blk_height = height;
                     const char *tmpl = json_string_value(json_object_get(result, "blocktemplate_blob"));
                     const char *hasher = json_string_value(json_object_get(result, "blockhashing_blob"));
                     uint64_t diff = json_integer_value(json_object_get(result, "difficulty"));
@@ -1443,6 +1442,7 @@ static void *daemon_thread(void *userdata) {
                     g_work.xnonce2 = (unsigned char *)strdup(tmpl);
                     g_work.xnonce2_len = strlen(tmpl)+1;
                     prevheight = height;
+                    blk_height = height;
                     time(&g_work_time);
                     restart_threads();
                     pthread_mutex_unlock(&g_work_lock);
@@ -1455,7 +1455,6 @@ static void *daemon_thread(void *userdata) {
                 jheight = json_object_get(result, "count");
                 if (jheight) {
                     height = json_integer_value(jheight);
-                    blk_height = height;
                     if (height != prevheight) {
                         newblock = 1;
                         json_decref(val);
